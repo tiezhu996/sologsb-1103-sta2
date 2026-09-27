@@ -7,6 +7,7 @@ import {
   NForm,
   NFormItem,
   NInput,
+  NInputNumber,
   NModal,
   NTag,
   useDialog,
@@ -21,6 +22,7 @@ import { useCueOrder } from '@/hooks/useCueOrder'
 import { useCueStore } from '@/stores/cueStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import type { CueOrderSummary } from '@/types/cue'
+import { COLOR_TEMP_MAX, COLOR_TEMP_MIN, COLOR_TEMP_STEP } from '@/types/level'
 import { createEmptySessionDraft, type Session, type SessionDraft, type SessionStat } from '@/types/session'
 import { formatSeconds, sumCues } from '@/utils/fade'
 
@@ -92,7 +94,8 @@ function openEdit(session: Session): void {
     scriptPage: session.scriptPage,
     plannedStart: session.plannedStart,
     plannedEnd: session.plannedEnd,
-    stageNote: session.stageNote
+    stageNote: session.stageNote,
+    colorTempBaselineK: session.colorTempBaselineK ?? null
   })
   showModal.value = true
 }
@@ -231,7 +234,8 @@ function focusSession(id: string): void {
           <div class="session-card__titles">
             <p class="session-card__title">{{ session.title }}</p>
             <p class="session-card__meta">
-              剧本 {{ session.scriptPage || '—' }} · 计划 {{ session.plannedStart || '—' }} ~ {{ session.plannedEnd || '—' }}
+              剧本 {{ session.scriptPage || '—' }} · 计划 {{ session.plannedStart || '—' }} ~ {{ session.plannedEnd || '—'
+              }}<template v-if="session.colorTempBaselineK"> · 基调 {{ session.colorTempBaselineK }}K</template>
             </p>
           </div>
           <NTag v-if="session.id === sessionStore.currentSessionId" size="small" type="warning" :bordered="false">
@@ -311,6 +315,17 @@ function focusSession(id: string): void {
             type="textarea"
             :rows="3"
             placeholder="换景、道具、演员走位等舞台状态说明"
+          />
+        </NFormItem>
+        <NFormItem label="色温基调" path="colorTempBaselineK">
+          <NInputNumber
+            v-model:value="form.colorTempBaselineK"
+            :min="COLOR_TEMP_MIN"
+            :max="COLOR_TEMP_MAX"
+            :step="COLOR_TEMP_STEP"
+            clearable
+            placeholder="留空则按出现最多的色温档自动判定"
+            style="width: 100%"
           />
         </NFormItem>
       </NForm>

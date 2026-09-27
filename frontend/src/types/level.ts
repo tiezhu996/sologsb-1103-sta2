@@ -30,8 +30,10 @@ export interface ColorTempItem {
 
 /** 色温一致性校验结果 */
 export interface ColorTempCheck {
-  /** 出现次数最多的色温，作为基准 */
-  dominantK: number
+  /** 生效的基准色温：场次基调优先，未设基调时取出现次数最多的色温 */
+  baselineK: number
+  /** 基准来源：manual = 场次设定的色温基调，auto = 自动取出现最多的色温档 */
+  baselineSource: 'manual' | 'auto'
   /** 允许容差（K） */
   toleranceK: number
   items: ColorTempItem[]

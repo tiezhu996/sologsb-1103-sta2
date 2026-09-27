@@ -95,13 +95,21 @@ export function sumCues(input: readonly Cue[]): CueOrderSummary {
   }
 }
 
-/** 色温一致性判定：以出现次数最多的色温为基准，超过容差即漂移 */
+/**
+ * 色温一致性判定：超过容差即漂移。
+ * 传入场次色温基调（baselineK）时以基调为基准，不随通道数值变化；
+ * 未传时沿用旧行为，取出现次数最多的色温档为基准。
+ */
 export function checkColorTempConsistency(
-  input: ReadonlyArray<{ fixtureId: string; channel: number; position: FixturePosition; colorTempK: number }>
+  input: ReadonlyArray<{ fixtureId: string; channel: number; position: FixturePosition; colorTempK: number }>,
+  baselineK?: number | null
 ): ColorTempCheck {
+  const manual = typeof baselineK === 'number' && Number.isFinite(baselineK) && baselineK > 0
+
   if (input.length === 0) {
     return {
-      dominantK: 0,
+      baselineK: manual ? baselineK : 0,
+      baselineSource: manual ? 'manual' : 'auto',
       toleranceK: COLOR_TEMP_TOLERANCE_K,
       items: [],
       consistent: true,
@@ -109,35 +117,45 @@ export function checkColorTempConsistency(
     }
   }
 
-  const histogram = new Map<number, number>()
-  input.forEach((item) => histogram.set(item.colorTempK, (histogram.get(item.colorTempK) ?? 0) + 1))
+  let referenceK: number
+  let baselineSource: 'manual' | 'auto'
+  if (manual) {
+    referenceK = baselineK
+    baselineSource = 'manual'
+  } else {
+    const histogram = new Map<number, number>()
+    input.forEach((item) => histogram.set(item.colorTempK, (histogram.get(item.colorTempK) ?? 0) + 1))
 
-  let dominantK = input[0].colorTempK
-  let dominantCount = -1
-  Array.from(histogram.entries())
-    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
-    .forEach(([kelvin, count]) => {
-      if (count > dominantCount) {
-        dominantK = kelvin
-        dominantCount = count
-      }
-    })
+    referenceK = input[0].colorTempK
+    let dominantCount = -1
+    Array.from(histogram.entries())
+      .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+      .forEach(([kelvin, count]) => {
+        if (count > dominantCount) {
+          referenceK = kelvin
+          dominantCount = count
+        }
+      })
+    baselineSource = 'auto'
+  }
 
   const items: ColorTempItem[] = input.map((item) => {
-    const driftK = Math.abs(item.colorTempK - dominantK)
+    const driftK = Math.abs(item.colorTempK - referenceK)
     return { ...item, driftK, consistent: driftK <= COLOR_TEMP_TOLERANCE_K }
   })
   const drifted = items.filter((item) => !item.consistent)
+  const label = baselineSource === 'manual' ? '基调' : '基准'
 
   return {
-    dominantK,
+    baselineK: referenceK,
+    baselineSource,
     toleranceK: COLOR_TEMP_TOLERANCE_K,
     items,
     consistent: drifted.length === 0,
     message:
       drifted.length === 0
-        ? `色温一致：基准 ${dominantK}K，容差 ±${COLOR_TEMP_TOLERANCE_K}K`
-        : `色温漂移：${drifted.map((item) => `CH${item.channel}(${item.colorTempK}K)`).join('、')} 偏离基准 ${dominantK}K`
+        ? `色温一致：${label} ${referenceK}K，容差 ±${COLOR_TEMP_TOLERANCE_K}K`
+        : `色温漂移：${drifted.map((item) => `CH${item.channel}(${item.colorTempK}K)`).join('、')} 偏离${label} ${referenceK}K`
   }
 }
 

@@ -17,6 +17,8 @@ export interface Session {
   plannedEnd: string
   /** 舞台状态说明：换景、道具、演员走位等 */
   stageNote: string
+  /** 场次色温基调（K）：设定后本场 Cue 按它判定漂移；null 表示自动取出现最多的色温档 */
+  colorTempBaselineK: number | null
   /** 创建时间戳（毫秒） */
   createdAt: number
   /** 最近更新时间戳（毫秒） */
@@ -44,6 +46,7 @@ export function createEmptySessionDraft(order = 1): SessionDraft {
     scriptPage: '',
     plannedStart: '',
     plannedEnd: '',
-    stageNote: ''
+    stageNote: '',
+    colorTempBaselineK: null
   }
 }

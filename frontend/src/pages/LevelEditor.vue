@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NAlert, NButton, NInput, NInputNumber, NSlider, NSwitch, NTag, useMessage } from 'naive-ui'
 import BlankHint from '@/components/common/BlankHint.vue'
@@ -11,6 +11,7 @@ import { useFixtureStore } from '@/stores/fixtureStore'
 import { useLevelStore } from '@/stores/levelStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import type { Fixture, FixturePosition } from '@/types/fixture'
+import type { ColorTempCheck, ColorTempItem } from '@/types/level'
 import { COLOR_TEMP_MAX, COLOR_TEMP_MIN, COLOR_TEMP_STEP } from '@/types/level'
 import { cueTotalSeconds, checkColorTempConsistency, formatSeconds, formatTransition } from '@/utils/fade'
 import { normalizeCueNo } from '@/utils/cueOrder'
@@ -56,9 +57,57 @@ const tempItems = computed(() => {
   return items.sort((a, b) => a.channel - b.channel)
 })
 
-const tempCheck = computed(() => checkColorTempConsistency(tempItems.value))
+/** 场次色温基调：设定后本场所有 Cue 按它判漂移，不随通道数值变化 */
+const baselineK = computed(() => session.value?.colorTempBaselineK ?? null)
 
-const defaultTempK = computed(() => (tempCheck.value.dominantK > 0 ? tempCheck.value.dominantK : 3200))
+const tempCheck = computed(() => checkColorTempConsistency(tempItems.value, baselineK.value))
+
+/** 新增通道 / 一键对齐使用的默认色温：基调优先，否则自动基准，都没有时回落 3200K */
+const defaultTempK = computed(() => (tempCheck.value.baselineK > 0 ? tempCheck.value.baselineK : 3200))
+
+/** 基调输入草稿：跟随场次已设基调初始化，点「设为基调」才落库 */
+const baselineDraft = ref<number | null>(null)
+
+watch(
+  sessionId,
+  () => {
+    baselineDraft.value = session.value?.colorTempBaselineK ?? null
+  },
+  { immediate: true }
+)
+
+/** 对比两次判定，找出原先一致、按新基准偏出去的通道 */
+function newlyDrifted(before: ColorTempCheck, after: ColorTempCheck): ColorTempItem[] {
+  return after.items.filter(
+    (item) => !item.consistent && before.items.find((prev) => prev.fixtureId === item.fixtureId)?.consistent === true
+  )
+}
+
+function notifyBaselineChange(prefix: string, newly: ColorTempItem[]): void {
+  if (newly.length > 0) {
+    message.warning(`${prefix}；${newly.map((item) => `CH${item.channel}`).join('、')} 由一致变为漂移，已按新基准标出`)
+    return
+  }
+  message.success(prefix)
+}
+
+async function saveBaseline(): Promise<void> {
+  if (!session.value || baselineDraft.value === null) return
+  const target = Math.round(baselineDraft.value)
+  const before = tempCheck.value
+  await sessionStore.updateSession(session.value.id, { colorTempBaselineK: target })
+  const after = checkColorTempConsistency(tempItems.value, target)
+  notifyBaselineChange(`色温基调已设为 ${target}K，本场 Cue 按它判定漂移`, newlyDrifted(before, after))
+}
+
+async function clearBaseline(): Promise<void> {
+  if (!session.value) return
+  const before = tempCheck.value
+  await sessionStore.updateSession(session.value.id, { colorTempBaselineK: null })
+  baselineDraft.value = null
+  const after = checkColorTempConsistency(tempItems.value)
+  notifyBaselineChange('已清除色温基调，恢复按出现最多的色温档自动判定', newlyDrifted(before, after))
+}
 
 function isEnabled(fixtureId: string): boolean {
   return levelStore.levelOf(cueId.value, fixtureId) !== null
@@ -113,9 +162,9 @@ async function setColorTemp(fixtureId: string, value: number | null): Promise<vo
   await levelStore.upsertLevel(cueId.value, fixtureId, { colorTempK: value })
 }
 
-async function alignToDominant(): Promise<void> {
+async function alignToBaseline(): Promise<void> {
   if (levels.value.length === 0) return
-  const target = tempCheck.value.dominantK
+  const target = tempCheck.value.baselineK
   await Promise.all(levels.value.map((level) => levelStore.upsertLevel(cueId.value, level.fixtureId, { colorTempK: target })))
   message.success(`已将 ${levels.value.length} 个通道对齐到 ${target}K`)
 }
@@ -171,7 +220,7 @@ function goSheets(): void {
         <h1 class="page__title">通道电平编辑</h1>
         <p class="page__subtitle">
           {{ session ? `${session.order}. ${session.title}` : '所属场次不存在' }} ·
-          逐通道设定亮度与色温，超出容差的色温漂移会被提示。
+          逐通道设定亮度与色温，超出容差的色温漂移会被提示；可为场次设定固定色温基调。
         </p>
       </div>
       <div class="page__actions">
@@ -208,10 +257,35 @@ function goSheets(): void {
         {{ tempCheck.message }}
       </NAlert>
 
+      <div class="baseline-bar">
+        <span class="baseline-bar__label">色温基调</span>
+        <NInputNumber
+          v-model:value="baselineDraft"
+          size="small"
+          :min="COLOR_TEMP_MIN"
+          :max="COLOR_TEMP_MAX"
+          :step="COLOR_TEMP_STEP"
+          placeholder="未设定"
+          style="width: 110px"
+        />
+        <span class="baseline-bar__unit">K</span>
+        <NButton size="small" :disabled="baselineDraft === null || baselineDraft === baselineK" @click="saveBaseline">
+          设为基调
+        </NButton>
+        <NButton v-if="baselineK !== null" size="small" quaternary @click="clearBaseline">恢复自动</NButton>
+        <span class="baseline-bar__hint">
+          {{
+            baselineK !== null
+              ? `本场按基调 ${baselineK}K 判定漂移，通道数值变化不影响基调`
+              : '未设基调，按出现最多的色温档自动判定'
+          }}
+        </span>
+      </div>
+
       <div class="toolbar">
         <span class="toolbar__label">已设定 {{ levels.length }} / {{ fixtures.length }} 个通道</span>
         <span class="toolbar__spacer" />
-        <NButton size="small" :disabled="levels.length === 0" @click="alignToDominant">
+        <NButton size="small" :disabled="levels.length === 0" @click="alignToBaseline">
           全部对齐到 {{ defaultTempK }}K
         </NButton>
         <NButton size="small" quaternary type="error" :disabled="levels.length === 0" @click="clearAll">
@@ -320,7 +394,14 @@ function goSheets(): void {
       </section>
 
       <section v-if="levels.length > 0" class="panel">
-        <h2 class="panel__title">色温一致性检查<span class="panel__title-tag">容差 ±{{ tempCheck.toleranceK }}K</span></h2>
+        <h2 class="panel__title">
+          色温一致性检查
+          <span class="panel__title-tag">
+            {{ tempCheck.baselineSource === 'manual' ? '场次基调' : '自动基准' }} {{ tempCheck.baselineK }}K · 容差 ±{{
+              tempCheck.toleranceK
+            }}K
+          </span>
+        </h2>
         <div class="temp-grid">
           <div
             v-for="item in tempCheck.items"
@@ -373,6 +454,34 @@ function goSheets(): void {
 .toolbar__label {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.5);
+}
+
+.baseline-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.baseline-bar__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.baseline-bar__unit {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-left: -6px;
+}
+
+.baseline-bar__hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .level-table__head,
