@@ -8,7 +8,7 @@ import type { Session } from '@/types/session'
 /** IndexedDB 数据库名 */
 export const DB_NAME = 'gbcuesheet'
 /** 当前数据结构版本号，与 db.version() 对应 */
-export const DB_VERSION = 2
+export const DB_VERSION = 3
 
 /** 单键值元数据表，记录结构版本等本地状态 */
 export interface AppMetaRecord {
@@ -22,6 +22,7 @@ export interface AppMetaRecord {
  * - v1：场次 / 灯位通道 / Cue / 通道电平 / 排演表 五张表
  * - v2：场次补充 updatedAt 索引、排演表补充 sheetNo 索引与条目快照、新增 appMeta 元数据表，
  *       并对既有数据执行升级迁移（补齐字段、规范化遗留编号）
+ * - v3：场次新增色温基调 baseColorTempK（不新增索引），既有场次回填为 null（照旧自动挑众数）
  */
 export class CueSheetDatabase extends Dexie {
   sessions!: Table<Session, string>
@@ -74,6 +75,20 @@ export class CueSheetDatabase extends Dexie {
             if (!sheet.sheetNo) sheet.sheetNo = 'RS-LEGACY'
             if (!Array.isArray(sheet.cueLines)) sheet.cueLines = []
             if (!Array.isArray(sheet.includedCueIds)) sheet.includedCueIds = []
+          })
+      })
+
+    // v3 不改动任何索引，仅给场次补色温基调字段：null 表示未定，照旧自动挑众数
+    this.version(3)
+      .stores({})
+      .upgrade(async (transaction) => {
+        await transaction
+          .table('sessions')
+          .toCollection()
+          .modify((session: Session) => {
+            if (session.baseColorTempK === undefined || session.baseColorTempK === null) {
+              session.baseColorTempK = null
+            }
           })
       })
   }

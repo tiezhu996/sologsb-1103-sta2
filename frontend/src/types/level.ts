@@ -28,10 +28,15 @@ export interface ColorTempItem {
   consistent: boolean
 }
 
+/** 色温基准的来源 */
+export type ColorTempBaselineSource = 'session' | 'auto'
+
 /** 色温一致性校验结果 */
 export interface ColorTempCheck {
-  /** 出现次数最多的色温，作为基准 */
+  /** 本次判定使用的基准色温：场次定了基调用基调，否则自动取众数 */
   dominantK: number
+  /** 基准来源：`session` 为场次色温基调，`auto` 为本 Cue 自动挑选 */
+  baselineSource: ColorTempBaselineSource
   /** 允许容差（K） */
   toleranceK: number
   items: ColorTempItem[]
@@ -44,6 +49,8 @@ export const COLOR_TEMP_MIN = 2700
 export const COLOR_TEMP_MAX = 6500
 export const COLOR_TEMP_STEP = 100
 export const COLOR_TEMP_TOLERANCE_K = 400
+/** 无任何参考（未定基调且本 Cue 尚无电平）时的默认色温 */
+export const COLOR_TEMP_DEFAULT_K = 3200
 
 /** 亮度取值范围 */
 export const INTENSITY_MIN = 0

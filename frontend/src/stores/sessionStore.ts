@@ -73,6 +73,7 @@ export const useSessionStore = defineStore('session', () => {
       plannedStart: draft.plannedStart,
       plannedEnd: draft.plannedEnd,
       stageNote: draft.stageNote.trim(),
+      baseColorTempK: draft.baseColorTempK,
       createdAt: now,
       updatedAt: now
     }

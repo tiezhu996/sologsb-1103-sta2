@@ -1,6 +1,6 @@
 import type { Cue, CueOrderSummary, AdjacentTransition } from '@/types/cue'
 import type { FixturePosition } from '@/types/fixture'
-import type { ColorTempCheck, ColorTempItem } from '@/types/level'
+import type { ColorTempCheck, ColorTempItem, ColorTempBaselineSource } from '@/types/level'
 import { COLOR_TEMP_TOLERANCE_K } from '@/types/level'
 import type { RehearsalSheet, SheetCueLine } from '@/types/sheet'
 import type { Session } from '@/types/session'
@@ -95,13 +95,22 @@ export function sumCues(input: readonly Cue[]): CueOrderSummary {
   }
 }
 
-/** 色温一致性判定：以出现次数最多的色温为基准，超过容差即漂移 */
+/**
+ * 色温一致性判定：
+ * - 传入有效的 `baselineK`（场次色温基调）时一律以它为基准，基准不随通道数值变化，
+ *   原先一致的通道在改基调后若偏出新容差会被标为漂移；
+ * - 未传基调时照旧自动挑出本 Cue 出现次数最多的色温作为基准。
+ */
 export function checkColorTempConsistency(
-  input: ReadonlyArray<{ fixtureId: string; channel: number; position: FixturePosition; colorTempK: number }>
+  input: ReadonlyArray<{ fixtureId: string; channel: number; position: FixturePosition; colorTempK: number }>,
+  baselineK?: number | null
 ): ColorTempCheck {
+  const useSessionBaseline = typeof baselineK === 'number' && Number.isFinite(baselineK) && baselineK > 0
+
   if (input.length === 0) {
     return {
-      dominantK: 0,
+      dominantK: useSessionBaseline ? (baselineK as number) : 0,
+      baselineSource: useSessionBaseline ? 'session' : 'auto',
       toleranceK: COLOR_TEMP_TOLERANCE_K,
       items: [],
       consistent: true,
@@ -109,19 +118,27 @@ export function checkColorTempConsistency(
     }
   }
 
-  const histogram = new Map<number, number>()
-  input.forEach((item) => histogram.set(item.colorTempK, (histogram.get(item.colorTempK) ?? 0) + 1))
+  let dominantK: number
+  let baselineSource: ColorTempBaselineSource
+  if (useSessionBaseline) {
+    dominantK = baselineK as number
+    baselineSource = 'session'
+  } else {
+    baselineSource = 'auto'
+    const histogram = new Map<number, number>()
+    input.forEach((item) => histogram.set(item.colorTempK, (histogram.get(item.colorTempK) ?? 0) + 1))
 
-  let dominantK = input[0].colorTempK
-  let dominantCount = -1
-  Array.from(histogram.entries())
-    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
-    .forEach(([kelvin, count]) => {
-      if (count > dominantCount) {
-        dominantK = kelvin
-        dominantCount = count
-      }
-    })
+    dominantK = input[0].colorTempK
+    let dominantCount = -1
+    Array.from(histogram.entries())
+      .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+      .forEach(([kelvin, count]) => {
+        if (count > dominantCount) {
+          dominantK = kelvin
+          dominantCount = count
+        }
+      })
+  }
 
   const items: ColorTempItem[] = input.map((item) => {
     const driftK = Math.abs(item.colorTempK - dominantK)
@@ -129,15 +146,17 @@ export function checkColorTempConsistency(
   })
   const drifted = items.filter((item) => !item.consistent)
 
+  const basisText = baselineSource === 'session' ? `场次基调 ${dominantK}K` : `自动基准 ${dominantK}K`
   return {
     dominantK,
+    baselineSource,
     toleranceK: COLOR_TEMP_TOLERANCE_K,
     items,
     consistent: drifted.length === 0,
     message:
       drifted.length === 0
-        ? `色温一致：基准 ${dominantK}K，容差 ±${COLOR_TEMP_TOLERANCE_K}K`
-        : `色温漂移：${drifted.map((item) => `CH${item.channel}(${item.colorTempK}K)`).join('、')} 偏离基准 ${dominantK}K`
+        ? `色温一致：${basisText}，容差 ±${COLOR_TEMP_TOLERANCE_K}K`
+        : `色温漂移：${drifted.map((item) => `CH${item.channel}(${item.colorTempK}K)`).join('、')} 偏离${basisText}`
   }
 }
 

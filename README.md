@@ -38,10 +38,10 @@ docker compose up -d --build    # 改动代码后重新构建
 
 | 路由 | 页面 | 主要能力 | 消费模型 |
 | --- | --- | --- | --- |
-| `/sessions` | 场次编排 | 新建场次、上下调序、查看每场 Cue 数与过渡总时长、硬切衔接预警 | Session、Cue |
+| `/sessions` | 场次编排 | 新建场次、上下调序、设定本场色温基调、查看每场 Cue 数与过渡总时长、硬切衔接预警 | Session、Cue |
 | `/sessions/:id/fixtures` | 灯位通道配置台 | 通道号排布、按灯位分组折叠、重复通道号高亮、灯位负载校验 | Fixture、Session |
 | `/sessions/:id/cues` | Cue 编排时间轴 | 插入 / 复制 / 删除 Cue、拖拽调整先后、沿袭上一条参数、批量偏移过渡时间 | Cue、CueLevel |
-| `/cues/:id/levels` | 通道电平编辑 | 逐通道设定亮度与色温、色温漂移检查、一键对齐基准色温 | CueLevel、Fixture |
+| `/cues/:id/levels` | 通道电平编辑 | 逐通道设定亮度与色温、按场次基调或自动基准检查色温漂移、一键对齐基准色温 | CueLevel、Fixture |
 | `/sheets` | 排演表生成与导出 | 勾选 Cue 组表、本地留存历史、预览 / 复制 / 下载纯文本 | RehearsalSheet、Cue |
 
 核心动作闭环：**建场次 → 配灯位通道 → 插入 Cue → 设定过渡与通道电平 → 导出排演表**。
@@ -105,7 +105,8 @@ sologsb-1103/
 
 - 所有数据存放在**浏览器本地 IndexedDB**，数据库名 `gbcuesheet`，由 `src/utils/db.ts` 用 Dexie 统一封装；页面不直接读写数据库，只调用 store 的 action。
 - 共 6 张表：`sessions`、`fixtures`、`cues`、`levels`、`sheets`、`appMeta`（元数据）。
-- **数据结构版本号**：`DB_VERSION = 2`。`version(1)` 定义初始结构；`version(2)` 新增 `updatedAt` / `sheetNo` 索引、`appMeta` 表，并在 `upgrade()` 中迁移既有数据（补齐 `updatedAt`、`orderIndex`、`holdSec`，规范化遗留排演表编号与条目快照）。
+- **数据结构版本号**：`DB_VERSION = 3`。`version(1)` 定义初始结构；`version(2)` 新增 `updatedAt` / `sheetNo` 索引、`appMeta` 表，并在 `upgrade()` 中迁移既有数据（补齐 `updatedAt`、`orderIndex`、`holdSec`，规范化遗留排演表编号与条目快照）；`version(3)` 给场次新增色温基调字段 `baseColorTempK`（不新增索引），既有场次回填为 `null`（未定基调，照旧自动挑众数）。
+- 每场可定一个**色温基调**（`Session.baseColorTempK`，K，可清空）：定下后本场各 Cue 的漂移判定、一键对齐与新增通道默认色温一律照它，通道数值再怎么变基调都不动；改基调后已设电平的通道立即按新基调重判，原先一致但偏出新容差的通道会被标出。基调随场次一起存在本机 IndexedDB；未定基调的场次照旧按每条 Cue 自动挑众数。
 - 删除场次会级联清理其灯位通道、Cue、通道电平与排演表；删除通道会清理对应的电平记录。
 - **容器无状态**：不使用数据库服务、不挂载命名卷；换浏览器或清理站点数据即等于清空。排演表以生成时刻的快照留档，之后修改 Cue 不影响历史记录。
 

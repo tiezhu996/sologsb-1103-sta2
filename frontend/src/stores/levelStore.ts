@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import type { CueLevel } from '@/types/level'
-import { INTENSITY_MAX, INTENSITY_MIN } from '@/types/level'
+import { INTENSITY_MAX, INTENSITY_MIN, COLOR_TEMP_DEFAULT_K } from '@/types/level'
 import { db } from '@/utils/db'
 import { createId } from '@/utils/id'
 
@@ -78,7 +78,7 @@ export const useLevelStore = defineStore('level', () => {
       cueId,
       fixtureId,
       intensity: clampIntensity(patch.intensity ?? 0),
-      colorTempK: Math.round(patch.colorTempK ?? 3200),
+      colorTempK: Math.round(patch.colorTempK ?? COLOR_TEMP_DEFAULT_K),
       focusNote: patch.focusNote ?? '',
       updatedAt: now
     }

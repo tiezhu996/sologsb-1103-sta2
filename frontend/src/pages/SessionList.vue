@@ -7,6 +7,7 @@ import {
   NForm,
   NFormItem,
   NInput,
+  NInputNumber,
   NModal,
   NTag,
   useDialog,
@@ -21,6 +22,7 @@ import { useCueOrder } from '@/hooks/useCueOrder'
 import { useCueStore } from '@/stores/cueStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import type { CueOrderSummary } from '@/types/cue'
+import { COLOR_TEMP_MAX, COLOR_TEMP_MIN, COLOR_TEMP_STEP } from '@/types/level'
 import { createEmptySessionDraft, type Session, type SessionDraft, type SessionStat } from '@/types/session'
 import { formatSeconds, sumCues } from '@/utils/fade'
 
@@ -92,7 +94,8 @@ function openEdit(session: Session): void {
     scriptPage: session.scriptPage,
     plannedStart: session.plannedStart,
     plannedEnd: session.plannedEnd,
-    stageNote: session.stageNote
+    stageNote: session.stageNote,
+    baseColorTempK: session.baseColorTempK
   })
   showModal.value = true
 }
@@ -233,6 +236,9 @@ function focusSession(id: string): void {
             <p class="session-card__meta">
               剧本 {{ session.scriptPage || '—' }} · 计划 {{ session.plannedStart || '—' }} ~ {{ session.plannedEnd || '—' }}
             </p>
+            <p class="session-card__baseline mono">
+              色温基调：{{ session.baseColorTempK !== null ? `${session.baseColorTempK}K` : '未定（自动挑选）' }}
+            </p>
           </div>
           <NTag v-if="session.id === sessionStore.currentSessionId" size="small" type="warning" :bordered="false">
             当前场次
@@ -304,6 +310,20 @@ function focusSession(id: string): void {
         </NFormItem>
         <NFormItem label="计划结束" path="plannedEnd">
           <NInput v-model:value="form.plannedEnd" placeholder="19:42" />
+        </NFormItem>
+        <NFormItem label="色温基调" path="baseColorTempK">
+          <div class="baseline-field">
+            <NInputNumber
+              v-model:value="form.baseColorTempK"
+              :min="COLOR_TEMP_MIN"
+              :max="COLOR_TEMP_MAX"
+              :step="COLOR_TEMP_STEP"
+              clearable
+              placeholder="未定（自动）"
+              style="width: 180px"
+            />
+            <span class="baseline-field__hint">定下后本场各 Cue 照它判漂移、一键对齐与新增通道默认色温；留空则照旧自动挑众数</span>
+          </div>
         </NFormItem>
         <NFormItem label="舞台状态" path="stageNote">
           <NInput
@@ -408,6 +428,24 @@ function focusSession(id: string): void {
 
 .session-card__meta {
   margin: 4px 0 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.session-card__baseline {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: rgba(242, 181, 68, 0.75);
+}
+
+.baseline-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.baseline-field__hint {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.45);
 }

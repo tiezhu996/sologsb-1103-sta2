@@ -11,7 +11,13 @@ import { useFixtureStore } from '@/stores/fixtureStore'
 import { useLevelStore } from '@/stores/levelStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import type { Fixture, FixturePosition } from '@/types/fixture'
-import { COLOR_TEMP_MAX, COLOR_TEMP_MIN, COLOR_TEMP_STEP } from '@/types/level'
+import {
+  COLOR_TEMP_DEFAULT_K,
+  COLOR_TEMP_MAX,
+  COLOR_TEMP_MIN,
+  COLOR_TEMP_STEP
+} from '@/types/level'
+import { clampColorTempK } from '@/types/session'
 import { cueTotalSeconds, checkColorTempConsistency, formatSeconds, formatTransition } from '@/utils/fade'
 import { normalizeCueNo } from '@/utils/cueOrder'
 
@@ -56,9 +62,17 @@ const tempItems = computed(() => {
   return items.sort((a, b) => a.channel - b.channel)
 })
 
-const tempCheck = computed(() => checkColorTempConsistency(tempItems.value))
+const tempCheck = computed(() => checkColorTempConsistency(tempItems.value, session.value?.baseColorTempK ?? null))
 
-const defaultTempK = computed(() => (tempCheck.value.dominantK > 0 ? tempCheck.value.dominantK : 3200))
+/**
+ * 新增通道默认色温 / 一键对齐目标：
+ * 场次定了基调就照基调；没定基调照旧取本 Cue 众数；一条电平都没有时落到兜底值。
+ */
+const defaultTempK = computed(() => {
+  const sessionBaseline = session.value?.baseColorTempK
+  if (typeof sessionBaseline === 'number' && sessionBaseline > 0) return sessionBaseline
+  return tempCheck.value.dominantK > 0 ? tempCheck.value.dominantK : COLOR_TEMP_DEFAULT_K
+})
 
 function isEnabled(fixtureId: string): boolean {
   return levelStore.levelOf(cueId.value, fixtureId) !== null
@@ -115,9 +129,18 @@ async function setColorTemp(fixtureId: string, value: number | null): Promise<vo
 
 async function alignToDominant(): Promise<void> {
   if (levels.value.length === 0) return
-  const target = tempCheck.value.dominantK
+  const target = defaultTempK.value
   await Promise.all(levels.value.map((level) => levelStore.upsertLevel(cueId.value, level.fixtureId, { colorTempK: target })))
   message.success(`已将 ${levels.value.length} 个通道对齐到 ${target}K`)
+}
+
+/** 定下 / 修改本场色温基调；基调变了，已设电平的通道立即按新基调重判 */
+async function saveSessionBaseline(value: number | null): Promise<void> {
+  if (!session.value) return
+  const next = value === null ? null : clampColorTempK(value)
+  if (next === session.value.baseColorTempK) return
+  await sessionStore.updateSession(session.value.id, { baseColorTempK: next })
+  message.success(next === null ? '已清除基调，恢复自动挑选' : `本场色温基调已定为 ${next}K`)
 }
 
 async function clearAll(): Promise<void> {
@@ -203,6 +226,27 @@ function goSheets(): void {
           <FadeBar :fade-in-sec="cue.fadeInSec" :hold-sec="cue.holdSec" :fade-out-sec="cue.fadeOutSec" :height="14" />
         </div>
       </section>
+
+      <div class="baseline-bar">
+        <span class="baseline-bar__label">本场色温基调</span>
+        <NInputNumber
+          :value="session?.baseColorTempK ?? null"
+          size="small"
+          :min="COLOR_TEMP_MIN"
+          :max="COLOR_TEMP_MAX"
+          :step="COLOR_TEMP_STEP"
+          clearable
+          placeholder="未定（自动）"
+          style="width: 150px"
+          @update:value="(value) => saveSessionBaseline(value)"
+        />
+        <NTag size="small" :bordered="false" :type="tempCheck.baselineSource === 'session' ? 'warning' : 'default'">
+          {{ tempCheck.baselineSource === 'session' ? `基调 ${tempCheck.dominantK}K` : '自动挑选' }}
+        </NTag>
+        <span class="baseline-bar__hint">
+          定下后本场通道都照它判漂移；基调不随通道数值变化，改基调后已设电平会按新基调重判。
+        </span>
+      </div>
 
       <NAlert :type="tempCheck.consistent ? 'success' : 'warning'" :bordered="false">
         {{ tempCheck.message }}
@@ -320,7 +364,12 @@ function goSheets(): void {
       </section>
 
       <section v-if="levels.length > 0" class="panel">
-        <h2 class="panel__title">色温一致性检查<span class="panel__title-tag">容差 ±{{ tempCheck.toleranceK }}K</span></h2>
+        <h2 class="panel__title">
+          色温一致性检查<span class="panel__title-tag">
+            {{ tempCheck.baselineSource === 'session' ? '场次基调' : '自动基准' }} {{ tempCheck.dominantK }}K ·
+            容差 ±{{ tempCheck.toleranceK }}K
+          </span>
+        </h2>
         <div class="temp-grid">
           <div
             v-for="item in tempCheck.items"
@@ -368,6 +417,23 @@ function goSheets(): void {
 .cue-head__bar {
   margin-top: 14px;
   max-width: 620px;
+}
+
+.baseline-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.baseline-bar__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.baseline-bar__hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .toolbar__label {
